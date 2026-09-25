@@ -1,0 +1,8 @@
+# 第三方依赖列表：每行一个 Maven 坐标（groupId:artifactId:version）
+# 以 # 开头的行是注释。构建时会自动下载并打进 APK。
+#
+# 示例（取消注释即可启用；注意把传递依赖也列全）：
+ com.squareup.okhttp3:okhttp:4.12.0
+ com.squareup.okio:okio:3.9.0
+#
+# 带资源的库（material、appcompat 等）暂不支持，会因为缺少资源而报错。
