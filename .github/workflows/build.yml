@@ -1,4 +1,4 @@
-name: Build APK (manual toolchain, no Gradle)
+name: Build APK (Gradle)
 
 on:
   push:
@@ -16,20 +16,26 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Show Android SDK
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Show environment
         run: |
+          java -version
+          gradle --version | head -8
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls "$ANDROID_HOME/build-tools" || true
           ls "$ANDROID_HOME/platforms" || true
 
-      - name: Install Kotlin compiler
+      - name: Ensure Android SDK platform 34
         run: |
-          curl -sSLo kotlin.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
-          unzip -q kotlin.zip
-          echo "$PWD/kotlinc/bin" >> $GITHUB_PATH
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -n "$SDK" ] && [ ! -d "$SDK/platforms/android-34" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" || true
+          fi
 
-      - name: Build with aapt2 + kotlinc + d8 + apksigner
+      - name: Build with Gradle (AGP)
         run: bash scripts/build.sh
 
       - name: Upload APK
