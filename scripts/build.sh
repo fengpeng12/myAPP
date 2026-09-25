@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 最小 Android 工具链构建：aapt2 → kotlinc → javac → d8 → zipalign → apksigner
+# 最小 Android 工具链构建：依赖下载 → aapt2 → kotlinc → javac → d8 → zipalign → apksigner
 set -eo pipefail
 
 SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
@@ -24,7 +24,38 @@ java -version 2>&1 | head -1
 
 OUT="build-manual"
 rm -rf "$OUT"
-mkdir -p "$OUT/compiled" "$OUT/classes" "$OUT/dex" "$OUT/gen"
+mkdir -p "$OUT/compiled" "$OUT/classes" "$OUT/dex" "$OUT/gen" "$OUT/libs"
+
+echo "== 0/7 下载第三方依赖（deps.txt）=="
+if [ -f deps.txt ]; then
+  while IFS= read -r coord || [ -n "$coord" ]; do
+    coord="$(printf '%s' "$coord" | sed 's/#.*//' | tr -d ' \r')"
+    [ -z "$coord" ] && continue
+    GROUP="$(printf '%s' "$coord" | cut -d: -f1 | tr '.' '/')"
+    ART="$(printf '%s' "$coord" | cut -d: -f2)"
+    VER="$(printf '%s' "$coord" | cut -d: -f3)"
+    BASE="https://repo1.maven.org/maven2/$GROUP/$ART/$VER"
+    if curl -sSLf -o "$OUT/libs/$ART-$VER.aar" "$BASE/$ART-$VER.aar" 2>/dev/null; then
+      if ( cd "$OUT/libs" && unzip -o -q "$ART-$VER.aar" classes.jar && mv -f classes.jar "$ART-$VER.jar" ); then
+        rm -f "$OUT/libs/$ART-$VER.aar"
+        echo "   ✔ $coord (aar → jar)"
+      else
+        echo "   ✘ $coord 解压失败"
+      fi
+    elif curl -sSLf -o "$OUT/libs/$ART-$VER.jar" "$BASE/$ART-$VER.jar" 2>/dev/null; then
+      echo "   ✔ $coord (jar)"
+    else
+      rm -f "$OUT/libs/$ART-$VER.aar" "$OUT/libs/$ART-$VER.jar"
+      echo "   ✘ 下载失败：$coord（检查坐标是否正确）"
+    fi
+  done < deps.txt
+else
+  echo "   （无 deps.txt，跳过）"
+fi
+LIBS="$(find "$OUT/libs" -name '*.jar' 2>/dev/null | tr '\n' ':')"
+LIBS="${LIBS%:}"
+if [ -n "$LIBS" ]; then CP="$PLATFORM:$LIBS"; else CP="$PLATFORM"; fi
+echo "classpath = $CP"
 
 echo "== 1/7 aapt2 compile 资源 =="
 "$BT/aapt2" compile --dir app/src/main/res -o "$OUT/compiled/res.zip"
@@ -37,22 +68,22 @@ echo "== 2/7 aapt2 link（生成 R.java + resources.ap_）=="
   "$OUT/compiled/res.zip"
 
 echo "== 3/7 kotlinc 编译 Kotlin =="
-kotlinc app/src/main/kotlin -classpath "$PLATFORM" -jvm-target 17 -d "$OUT/classes"
+kotlinc app/src/main/kotlin -classpath "$CP" -jvm-target 17 -d "$OUT/classes"
 
 echo "== 4/7 javac 编译 R.java =="
 JAVAS="$(find "$OUT/gen" -name '*.java' 2>/dev/null || true)"
 if [ -n "$JAVAS" ]; then
-  javac -classpath "$PLATFORM" -d "$OUT/classes" $JAVAS
+  javac -classpath "$CP" -d "$OUT/classes" $JAVAS
 else
-  echo "（未生成 R.java，跳过）"
+  echo "   （未生成 R.java，跳过）"
 fi
 
-echo "== 5/7 d8 转 dex（含 kotlin-stdlib）=="
+echo "== 5/7 d8 转 dex（含 kotlin-stdlib 与第三方 jar）=="
 KOTLIN_HOME="$(dirname "$(which kotlinc)")/.."
 STDLIB="$KOTLIN_HOME/lib/kotlin-stdlib.jar"
 echo "stdlib = $STDLIB"
 "$BT/d8" --lib "$PLATFORM" --min-api 21 --output "$OUT/dex" \
-  $(find "$OUT/classes" -name '*.class') "$STDLIB"
+  $(find "$OUT/classes" -name '*.class') $(find "$OUT/libs" -name '*.jar') "$STDLIB"
 
 echo "== 6/7 组装 APK =="
 cp "$OUT/resources.ap_" "$OUT/unsigned.apk"
