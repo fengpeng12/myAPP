@@ -1,116 +1,146 @@
 #!/usr/bin/env bash
-# 最小 Android 工具链构建：依赖下载 → aapt2 → kotlinc → javac → d8 → zipalign → apksigner
+# Gradle 模式：Android Gradle Plugin(AGP) 构建，自动解析传递依赖 + 合并 AAR 资源。
 set -eo pipefail
 
-SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
-if [ -z "$SDK" ] || [ ! -d "$SDK" ]; then SDK="/usr/local/lib/android/sdk"; fi
-if [ ! -d "$SDK" ]; then echo "❌ 找不到 Android SDK"; exit 1; fi
-echo "SDK = $SDK"
+echo "== 构建方式：Gradle（AGP 8.5.2）=="
 
-if [ ! -d "$SDK/build-tools" ]; then echo "❌ 缺少 build-tools"; exit 1; fi
-BT="$SDK/build-tools/$(ls "$SDK/build-tools" | sort -V | tail -1)"
-echo "build-tools = $BT"
+MF=app/src/main/AndroidManifest.xml
+if [ ! -f "$MF" ]; then echo "缺少 $MF"; exit 1; fi
 
-if [ -f "$SDK/platforms/android-34/android.jar" ]; then
-  PLATFORM="$SDK/platforms/android-34/android.jar"
-else
-  PLATFORM="$(ls -d "$SDK"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1)"
-fi
-if [ -z "$PLATFORM" ] || [ ! -f "$PLATFORM" ]; then echo "❌ 找不到 android.jar"; exit 1; fi
-echo "platform = $PLATFORM"
+# 1) 包名：从 manifest 读取（AGP 8 要求写在 namespace，所以稍后会从 manifest 里删掉该属性）
+PKG="$(grep -o 'package="[^"]*"' "$MF" | head -1 | sed 's/package="//; s/"$//' || true)"
+[ -z "$PKG" ] && PKG="com.example.hello"
+echo "namespace = $PKG"
 
-echo "kotlinc = $(which kotlinc || echo 未找到)"
-java -version 2>&1 | head -1
-
-OUT="build-manual"
-rm -rf "$OUT"
-mkdir -p "$OUT/compiled" "$OUT/classes" "$OUT/dex" "$OUT/gen" "$OUT/libs"
-
-echo "== 0/7 下载第三方依赖（deps.txt）=="
-if [ -f deps.txt ]; then
-  while IFS= read -r coord || [ -n "$coord" ]; do
-    coord="$(printf '%s' "$coord" | sed 's/#.*//' | tr -d ' \r')"
-    [ -z "$coord" ] && continue
-    GROUP="$(printf '%s' "$coord" | cut -d: -f1 | tr '.' '/')"
-    ART="$(printf '%s' "$coord" | cut -d: -f2)"
-    VER="$(printf '%s' "$coord" | cut -d: -f3)"
-    BASE="https://repo1.maven.org/maven2/$GROUP/$ART/$VER"
-    if curl -sSLf -o "$OUT/libs/$ART-$VER.aar" "$BASE/$ART-$VER.aar" 2>/dev/null; then
-      if ( cd "$OUT/libs" && unzip -o -q "$ART-$VER.aar" classes.jar && mv -f classes.jar "$ART-$VER.jar" ); then
-        rm -f "$OUT/libs/$ART-$VER.aar"
-        echo "   ✔ $coord (aar → jar)"
-      else
-        echo "   ✘ $coord 解压失败"
-      fi
-    elif curl -sSLf -o "$OUT/libs/$ART-$VER.jar" "$BASE/$ART-$VER.jar" 2>/dev/null; then
-      echo "   ✔ $coord (jar)"
-    else
-      rm -f "$OUT/libs/$ART-$VER.aar" "$OUT/libs/$ART-$VER.jar"
-      echo "   ✘ 下载失败：$coord（检查坐标是否正确）"
-    fi
-  done < deps.txt
-else
-  echo "   （无 deps.txt，跳过）"
-fi
-LIBS="$(find "$OUT/libs" -name '*.jar' 2>/dev/null | tr '\n' ':')"
-LIBS="${LIBS%:}"
-if [ -n "$LIBS" ]; then CP="$PLATFORM:$LIBS"; else CP="$PLATFORM"; fi
-echo "classpath = $CP"
-
-echo "== 读取 App 版本信息（appinfo.properties）=="
-VCODE=1
-VNAME="1.0"
+# 2) 版本信息
+VCODE=1; VNAME="1.0"
 if [ -f appinfo.properties ]; then
-  VCODE="$(grep -E '^versionCode=' appinfo.properties | head -1 | cut -d= -f2 | tr -d ' \r')"
-  VNAME="$(grep -E '^versionName=' appinfo.properties | head -1 | cut -d= -f2 | tr -d ' \r')"
+  VCODE="$(grep -E '^versionCode=' appinfo.properties | head -1 | cut -d= -f2 | tr -d ' \r' || true)"
+  VNAME="$(grep -E '^versionName=' appinfo.properties | head -1 | cut -d= -f2 | tr -d ' \r' || true)"
 fi
 [ -z "$VCODE" ] && VCODE=1
 [ -z "$VNAME" ] && VNAME="1.0"
 echo "version = $VNAME ($VCODE)"
 
-echo "== 1/7 aapt2 compile 资源 =="
-"$BT/aapt2" compile --dir app/src/main/res -o "$OUT/compiled/res.zip"
+# 3) deps.txt → implementation("坐标")
+DEPS=""
+if [ -f deps.txt ]; then
+  while IFS= read -r coord || [ -n "$coord" ]; do
+    coord="$(printf '%s' "$coord" | sed 's/#.*//' | tr -d ' \r')"
+    [ -z "$coord" ] && continue
+    DEPS="$DEPS    implementation(\"$coord\")
+"
+  done < deps.txt
+fi
+echo "依赖："
+printf '%s' "$DEPS"
 
-echo "== 2/7 aapt2 link（生成 R.java + resources.ap_）=="
-"$BT/aapt2" link -o "$OUT/resources.ap_" -I "$PLATFORM" \
-  --manifest app/src/main/AndroidManifest.xml \
-  --java "$OUT/gen" \
-  --min-sdk-version 21 --target-sdk-version 34 \
-  --version-code "$VCODE" --version-name "$VNAME" \
-  "$OUT/compiled/res.zip"
+# 4) 出现 Compose 依赖时自动开启 Compose 支持
+COMPOSE_BLOCK=""
+case "$DEPS" in
+  *androidx.compose*|*activity-compose*)
+    COMPOSE_BLOCK='    buildFeatures {
+        compose = true
+    }
 
-echo "== 3/7 kotlinc 编译 Kotlin =="
-kotlinc app/src/main/kotlin -classpath "$CP" -jvm-target 17 -d "$OUT/classes"
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.14"
+    }
 
-echo "== 4/7 javac 编译 R.java =="
-JAVAS="$(find "$OUT/gen" -name '*.java' 2>/dev/null || true)"
-if [ -n "$JAVAS" ]; then
-  javac -classpath "$CP" -d "$OUT/classes" $JAVAS
-else
-  echo "   （未生成 R.java，跳过）"
+'
+    ;;
+esac
+
+# 5) 生成 Gradle 工程文件（工作区里若已有同名文件则保留，便于自定义）
+if [ ! -f settings.gradle.kts ]; then
+  cat > settings.gradle.kts <<'WEBONLY_EOF'
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "webnex-app"
+include(":app")
+WEBONLY_EOF
 fi
 
-echo "== 5/7 d8 转 dex（含 kotlin-stdlib 与第三方 jar）=="
-KOTLIN_HOME="$(dirname "$(which kotlinc)")/.."
-STDLIB="$KOTLIN_HOME/lib/kotlin-stdlib.jar"
-echo "stdlib = $STDLIB"
-"$BT/d8" --lib "$PLATFORM" --min-api 21 --output "$OUT/dex" \
-  $(find "$OUT/classes" -name '*.class') $(find "$OUT/libs" -name '*.jar') "$STDLIB"
-
-echo "== 6/7 组装 APK =="
-cp "$OUT/resources.ap_" "$OUT/unsigned.apk"
-(cd "$OUT" && zip -q -j unsigned.apk dex/classes.dex)
-
-echo "== 7/7 zipalign + apksigner 签名 =="
-"$BT/zipalign" -f -p 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
-if [ ! -f debug.keystore ]; then
-  keytool -genkeypair -keystore debug.keystore -alias androiddebugkey \
-    -storepass android -keypass android \
-    -dname "CN=Android Debug,O=Android,C=US" \
-    -keyalg RSA -keysize 2048 -validity 10000
+if [ ! -f build.gradle.kts ]; then
+  cat > build.gradle.kts <<'WEBONLY_EOF'
+plugins {
+    id("com.android.application") version "8.5.2" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+}
+WEBONLY_EOF
 fi
-"$BT/apksigner" sign --ks debug.keystore --ks-pass pass:android --key-pass pass:android \
-  --out app-debug.apk "$OUT/aligned.apk"
 
+if [ ! -f gradle.properties ]; then
+  cat > gradle.properties <<'WEBONLY_EOF'
+android.useAndroidX=true
+android.nonTransitiveRClass=true
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+kotlin.code.style=official
+WEBONLY_EOF
+fi
+
+if [ ! -f app/build.gradle.kts ]; then
+  cat > app/build.gradle.kts <<WEBONLY_EOF
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "$PKG"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "$PKG"
+        minSdk = 21
+        targetSdk = 34
+        versionCode = $VCODE
+        versionName = "$VNAME"
+    }
+
+    sourceSets {
+        getByName("main") {
+            java.srcDirs("src/main/kotlin")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+$COMPOSE_BLOCK    buildTypes {
+        release {
+            isMinifyEnabled = false
+        }
+    }
+}
+
+dependencies {
+$DEPS}
+WEBONLY_EOF
+fi
+# 6) AGP 8 不再接受 manifest 里的 package 属性（改用 build.gradle.kts 的 namespace）
+sed -i 's/[[:space:]]*package="[^"]*"//' "$MF"
+
+# 7) 构建
+gradle assembleDebug --no-daemon --stacktrace
+
+cp app/build/outputs/apk/debug/app-debug.apk app-debug.apk
 ls -lh app-debug.apk
-echo "✅ 构建完成（手动工具链，未使用 Gradle）"
+echo "构建完成（Gradle 模式）"
