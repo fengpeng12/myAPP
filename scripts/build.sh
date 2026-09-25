@@ -57,6 +57,17 @@ LIBS="${LIBS%:}"
 if [ -n "$LIBS" ]; then CP="$PLATFORM:$LIBS"; else CP="$PLATFORM"; fi
 echo "classpath = $CP"
 
+echo "== 读取 App 版本信息（appinfo.properties）=="
+VCODE=1
+VNAME="1.0"
+if [ -f appinfo.properties ]; then
+  VCODE="$(grep -E '^versionCode=' appinfo.properties | head -1 | cut -d= -f2 | tr -d ' \r')"
+  VNAME="$(grep -E '^versionName=' appinfo.properties | head -1 | cut -d= -f2 | tr -d ' \r')"
+fi
+[ -z "$VCODE" ] && VCODE=1
+[ -z "$VNAME" ] && VNAME="1.0"
+echo "version = $VNAME ($VCODE)"
+
 echo "== 1/7 aapt2 compile 资源 =="
 "$BT/aapt2" compile --dir app/src/main/res -o "$OUT/compiled/res.zip"
 
@@ -65,6 +76,7 @@ echo "== 2/7 aapt2 link（生成 R.java + resources.ap_）=="
   --manifest app/src/main/AndroidManifest.xml \
   --java "$OUT/gen" \
   --min-sdk-version 21 --target-sdk-version 34 \
+  --version-code "$VCODE" --version-name "$VNAME" \
   "$OUT/compiled/res.zip"
 
 echo "== 3/7 kotlinc 编译 Kotlin =="
