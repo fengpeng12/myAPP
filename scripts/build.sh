@@ -1,21 +1,35 @@
 #!/usr/bin/env bash
 # 最小 Android 工具链构建：aapt2 → kotlinc → javac → d8 → zipalign → apksigner
-# 与 WebNex CodeAssist 引擎同样的原理：绕过 Gradle，自己串工具。
-set -euo pipefail
+set -eo pipefail
 
 SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
-if [ -z "$SDK" ]; then echo "未找到 Android SDK（ANDROID_HOME）"; exit 1; fi
-BT="$SDK/build-tools/34.0.0"
-PLATFORM="$SDK/platforms/android-34/android.jar"
-OUT="build-manual"
+if [ -z "$SDK" ] || [ ! -d "$SDK" ]; then SDK="/usr/local/lib/android/sdk"; fi
+if [ ! -d "$SDK" ]; then echo "❌ 找不到 Android SDK"; exit 1; fi
+echo "SDK = $SDK"
 
+if [ ! -d "$SDK/build-tools" ]; then echo "❌ 缺少 build-tools"; exit 1; fi
+BT="$SDK/build-tools/$(ls "$SDK/build-tools" | sort -V | tail -1)"
+echo "build-tools = $BT"
+
+if [ -f "$SDK/platforms/android-34/android.jar" ]; then
+  PLATFORM="$SDK/platforms/android-34/android.jar"
+else
+  PLATFORM="$(ls -d "$SDK"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1)"
+fi
+if [ -z "$PLATFORM" ] || [ ! -f "$PLATFORM" ]; then echo "❌ 找不到 android.jar"; exit 1; fi
+echo "platform = $PLATFORM"
+
+echo "kotlinc = $(which kotlinc || echo 未找到)"
+java -version 2>&1 | head -1
+
+OUT="build-manual"
 rm -rf "$OUT"
 mkdir -p "$OUT/compiled" "$OUT/classes" "$OUT/dex" "$OUT/gen"
 
 echo "== 1/7 aapt2 compile 资源 =="
 "$BT/aapt2" compile --dir app/src/main/res -o "$OUT/compiled/res.zip"
 
-echo "== 2/7 aapt2 link 资源（生成 R.java + resources.ap_）=="
+echo "== 2/7 aapt2 link（生成 R.java + resources.ap_）=="
 "$BT/aapt2" link -o "$OUT/resources.ap_" -I "$PLATFORM" \
   --manifest app/src/main/AndroidManifest.xml \
   --java "$OUT/gen" \
@@ -26,11 +40,17 @@ echo "== 3/7 kotlinc 编译 Kotlin =="
 kotlinc app/src/main/kotlin -classpath "$PLATFORM" -jvm-target 17 -d "$OUT/classes"
 
 echo "== 4/7 javac 编译 R.java =="
-javac -classpath "$PLATFORM" -d "$OUT/classes" $(find "$OUT/gen" -name '*.java')
+JAVAS="$(find "$OUT/gen" -name '*.java' 2>/dev/null || true)"
+if [ -n "$JAVAS" ]; then
+  javac -classpath "$PLATFORM" -d "$OUT/classes" $JAVAS
+else
+  echo "（未生成 R.java，跳过）"
+fi
 
-echo "== 5/7 d8 转 dex（含 kotlin-stdlib，否则运行时会缺类）=="
+echo "== 5/7 d8 转 dex（含 kotlin-stdlib）=="
 KOTLIN_HOME="$(dirname "$(which kotlinc)")/.."
 STDLIB="$KOTLIN_HOME/lib/kotlin-stdlib.jar"
+echo "stdlib = $STDLIB"
 "$BT/d8" --lib "$PLATFORM" --min-api 21 --output "$OUT/dex" \
   $(find "$OUT/classes" -name '*.class') "$STDLIB"
 
