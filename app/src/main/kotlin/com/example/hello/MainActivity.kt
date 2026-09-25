@@ -7,7 +7,7 @@ import android.widget.TextView
 class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val tv = TextView(this).apply { text = "  你好!" }
+        val tv = TextView(this).apply { text = "  你好!" 
         setContentView(tv)
     }
 }
