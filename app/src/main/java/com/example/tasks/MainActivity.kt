@@ -1,15 +1,21 @@
 package com.example.tasks
 
 import android.content.Context
+import android.graphics.Paint
 import android.os.Bundle
-import android.view.Gravity
-import android.widget.Button
+import android.view.LayoutInflater
+import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.google.android.material.button.MaterialButton
 
 /** 一条待办任务 */
 data class Task(var title: String, var done: Boolean)
@@ -19,23 +25,57 @@ class MainActivity : AppCompatActivity() {
     private lateinit var input: EditText
     private lateinit var listContainer: LinearLayout
     private lateinit var tvEmpty: TextView
+    private lateinit var tvSubtitle: TextView
     private val tasks = mutableListOf<Task>()
 
     private val prefs by lazy { getSharedPreferences("tasks_store", Context.MODE_PRIVATE) }
 
+    /** 基础内边距，与系统栏 inset 叠加 */
+    private val basePadding by lazy { (16 * resources.displayMetrics.density).toInt() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
         input = findViewById(R.id.inputTask)
         listContainer = findViewById(R.id.listContainer)
         tvEmpty = findViewById(R.id.tvEmpty)
-        val btnAdd = findViewById<Button>(R.id.btnAdd)
+        tvSubtitle = findViewById(R.id.tvSubtitle)
 
-        btnAdd.setOnClickListener { addTask() }
+        applyWindowInsets(findViewById(R.id.root))
+
+        findViewById<MaterialButton>(R.id.btnAdd).setOnClickListener { addTask() }
+        input.setOnEditorActionListener { _, _, _ ->
+            addTask()
+            true
+        }
 
         load()
         refresh()
+    }
+
+    /** 开启全屏沉浸式：内容延伸到系统栏之下，状态栏图标用深色 */
+    private fun enableEdgeToEdge() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
+        }
+    }
+
+    /** 给根布局加上系统栏内边距，避免内容被状态栏/导航栏遮挡 */
+    private fun applyWindowInsets(root: View) {
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(
+                basePadding + bars.left,
+                basePadding + bars.top,
+                basePadding + bars.right,
+                basePadding + bars.bottom
+            )
+            WindowInsetsCompat.CONSUMED
+        }
     }
 
     /** 添加新任务 */
@@ -58,46 +98,58 @@ class MainActivity : AppCompatActivity() {
         refresh()
     }
 
-    /** 重新渲染列表 */
+    /** 重新渲染列表与统计 */
     private fun refresh() {
         listContainer.removeAllViews()
-        tvEmpty.visibility = if (tasks.isEmpty()) TextView.VISIBLE else TextView.GONE
+        tvEmpty.visibility = if (tasks.isEmpty()) View.VISIBLE else View.GONE
         tasks.forEach { task ->
             listContainer.addView(buildRow(task))
         }
+        val doneCount = tasks.count { it.done }
+        tvSubtitle.text = if (tasks.isEmpty()) {
+            getString(R.string.subtitle_empty)
+        } else {
+            "共 ${tasks.size} 项 · 已完成 $doneCount"
+        }
     }
 
-    /** 构建一行的视图 */
-    private fun buildRow(task: Task): LinearLayout {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(8, 12, 8, 12)
-        }
+    /** 由 item_task 布局构建一行 */
+    private fun buildRow(task: Task): View {
+        val row = LayoutInflater.from(this).inflate(R.layout.item_task, listContainer, false)
+        val card = row.findViewById<View>(R.id.cardRow)
+        val cb = row.findViewById<CheckBox>(R.id.cbDone)
+        val title = row.findViewById<TextView>(R.id.tvTitle)
+        val del = row.findViewById<MaterialButton>(R.id.btnDel)
 
-        val check = CheckBox(this).apply {
-            isChecked = task.done
-            setOnCheckedChangeListener { _, checked ->
-                task.done = checked
-                save()
-            }
-        }
-        row.addView(check, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        bindRow(cb, title, task)
 
-        val title = TextView(this).apply {
-            text = task.title
-            textSize = 16f
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 4f)
+        card.setOnClickListener {
+            task.done = !task.done
+            save()
+            bindRow(cb, title, task)
+            refreshSubtitle()
         }
-        row.addView(title)
-
-        val del = Button(this).apply {
-            text = getString(R.string.delete)
-            setOnClickListener { removeTask(task) }
-        }
-        row.addView(del)
-
+        del.setOnClickListener { removeTask(task) }
         return row
+    }
+
+    /** 根据完成状态刷新勾选与文字样式 */
+    private fun bindRow(cb: CheckBox, title: TextView, task: Task) {
+        cb.isChecked = task.done
+        title.text = task.title
+        if (task.done) {
+            title.paintFlags = title.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+            title.setTextColor(getColor(R.color.done_text))
+        } else {
+            title.paintFlags = title.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+            title.setTextColor(getColor(R.color.text_primary))
+        }
+    }
+
+    /** 仅刷新顶部统计文字 */
+    private fun refreshSubtitle() {
+        val doneCount = tasks.count { it.done }
+        tvSubtitle.text = "共 ${tasks.size} 项 · 已完成 $doneCount"
     }
 
     /** 存储格式：done|标题，一行一条 */
