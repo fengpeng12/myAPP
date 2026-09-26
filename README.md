@@ -12,3 +12,5 @@
 - app/build.gradle.kts    应用模块配置（SDK 版本、依赖）
 - app/src/main/AndroidManifest.xml   应用清单（权限、Activity）
 - app/src/main/kotlin/... MainActivity.kt  界面代码
+#自动照验证
+this is an intentional syntax error <<< >>> unmatched [[[
