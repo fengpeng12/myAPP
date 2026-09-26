@@ -5,9 +5,6 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.ForegroundColorSpan
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
@@ -51,6 +48,9 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 去掉顶部系统标题栏，让渐变背景直接铺到顶部，与下方界面保持一致
+        actionBar?.hide()
 
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -187,24 +187,8 @@ class MainActivity : Activity() {
             setStroke(dp(2), accent)
         }
 
-        // 顶部标题栏与下方内容保持一致：同样使用主题渐变，标题文字转白
-        val start = Color.parseColor(t.start)
-        val end = Color.parseColor(t.end)
-        actionBar?.let { ab ->
-            ab.setBackgroundDrawable(
-                GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(start, end))
-            )
-            val title = SpannableString("我的第一个APP")
-            title.setSpan(
-                ForegroundColorSpan(Color.WHITE),
-                0,
-                title.length,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-            ab.title = title
-        }
-        // 状态栏也染成主题起始色，视觉上更连贯
-        window.statusBarColor = start
+        // 顶部已无标题栏，渐变背景直接铺到顶部；状态栏染成主题起始色，上下连成一体
+        window.statusBarColor = Color.parseColor(t.start)
     }
 
     // 计数增减并刷新
