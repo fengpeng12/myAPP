@@ -1,8 +1,10 @@
 # 第三方依赖列表：每行一个 Maven 坐标（groupId:artifactId:version）
-# 以 # 开头的行是注释。构建时会自动下载并打进 APK。
+# 以 # 开头的行是注释，构建时会自动下载并打进 APK。
 #
-# 示例（取消注释即可启用；注意把传递依赖也列全）：
- com.squareup.okhttp3:okhttp:4.12.0
- com.squareup.okio:okio:3.9.0
+# 【Gradle 模式】只写顶层依赖即可（传递依赖、AAR 资源由 Gradle 自动处理）：
+# com.google.android.material:material:1.12.0
+# androidx.constraintlayout:constraintlayout:2.1.4
 #
-# 带资源的库（material、appcompat 等）暂不支持，会因为缺少资源而报错。
+# 【手动工具链模式】需要自己把传递依赖也列全，且不支持带资源的库：
+# com.squareup.okhttp3:okhttp:4.12.0
+# com.squareup.okio:okio:3.9.0
