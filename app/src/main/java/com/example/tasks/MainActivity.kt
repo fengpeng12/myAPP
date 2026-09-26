@@ -26,6 +26,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var listContainer: LinearLayout
     private lateinit var tvEmpty: TextView
     private lateinit var tvSubtitle: TextView
+    private lateinit var btnClearDone: MaterialButton
     private val tasks = mutableListOf<Task>()
 
     private val prefs by lazy { getSharedPreferences("tasks_store", Context.MODE_PRIVATE) }
@@ -42,10 +43,12 @@ class MainActivity : AppCompatActivity() {
         listContainer = findViewById(R.id.listContainer)
         tvEmpty = findViewById(R.id.tvEmpty)
         tvSubtitle = findViewById(R.id.tvSubtitle)
+        btnClearDone = findViewById(R.id.btnClearDone)
 
         applyWindowInsets(findViewById(R.id.root))
 
         findViewById<MaterialButton>(R.id.btnAdd).setOnClickListener { addTask() }
+        btnClearDone.setOnClickListener { clearDone() }
         input.setOnEditorActionListener { _, _, _ ->
             addTask()
             true
@@ -98,6 +101,23 @@ class MainActivity : AppCompatActivity() {
         refresh()
     }
 
+    /** 清除全部已完成的任务 */
+    private fun clearDone() {
+        val done = tasks.count { it.done }
+        if (done == 0) {
+            Toast.makeText(this, getString(R.string.no_done), Toast.LENGTH_SHORT).show()
+            return
+        }
+        tasks.removeAll { it.done }
+        save()
+        refresh()
+        Toast.makeText(
+            this,
+            "${getString(R.string.cleared_prefix)} $done ${getString(R.string.cleared_suffix)}",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
     /** 重新渲染列表与统计 */
     private fun refresh() {
         listContainer.removeAllViews()
@@ -106,6 +126,7 @@ class MainActivity : AppCompatActivity() {
             listContainer.addView(buildRow(task))
         }
         val doneCount = tasks.count { it.done }
+        btnClearDone.visibility = if (doneCount > 0) View.VISIBLE else View.GONE
         tvSubtitle.text = if (tasks.isEmpty()) {
             getString(R.string.subtitle_empty)
         } else {
