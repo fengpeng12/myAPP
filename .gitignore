@@ -24,3 +24,6 @@ flutter/packages/catpaw_runtime/ios/Frameworks/
 native-work/
 native-output/
 decoder-fixtures/
+# 掌造仓库绑定状态文件（本地信息，不入库）
+repo.git
+.webnex-snapshots/
