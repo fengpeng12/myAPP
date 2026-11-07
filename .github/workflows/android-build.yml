@@ -52,8 +52,7 @@ jobs:
         # 不写进 if: 判断 —— Actions 不允许在 if 里用 secrets，会让整个 workflow 失效且无日志。
         env:
           MARCOMOVIE_KEYSTORE_B64: ${{ secrets.MARCOMOVIE_KEYSTORE_B64 }}
-          # Secret 未配置时兜底：允许临时密钥，否则构建会直接失败。
-          # 临时密钥每次不同 → 装包必须先卸载旧版；配好上面的 Secret 后即可稳定覆盖升级。
+          # 兜底开关：Secret 存在时脚本优先用 Secret 里的密钥，此开关只在密钥缺失时生效
           MARCOMOVIE_ALLOW_EPHEMERAL_KEY: "1"
         run: python scripts/build_android.py
 
