@@ -48,6 +48,13 @@ jobs:
           echo "ndk: $NDK"
 
       - name: Build APK
+        # 固定签名：密钥 base64 来自 Secret，脚本解码成 android/private/development.p12。
+        # 不写进 if: 判断 —— Actions 不允许在 if 里用 secrets，会让整个 workflow 失效且无日志。
+        env:
+          MARCOMOVIE_KEYSTORE_B64: ${{ secrets.MARCOMOVIE_KEYSTORE_B64 }}
+          # Secret 未配置时兜底：允许临时密钥，否则构建会直接失败。
+          # 临时密钥每次不同 → 装包必须先卸载旧版；配好上面的 Secret 后即可稳定覆盖升级。
+          MARCOMOVIE_ALLOW_EPHEMERAL_KEY: "1"
         run: python scripts/build_android.py
 
       - name: List outputs

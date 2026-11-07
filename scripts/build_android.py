@@ -101,9 +101,19 @@ def main():
     run(exe(SDK,'zipalign'),'-f','4',BUILD/'unsigned.apk',BUILD/'aligned.apk')
     release_mode = os.environ.get('MARCOMOVIE_RELEASE', '') == '1' or 'MARCOMOVIE_SIGNING_KEY' in os.environ
     key=Path(os.environ.get('MARCOMOVIE_SIGNING_KEY',str(ROOT/'android/private/development.p12')));key.parent.mkdir(parents=True,exist_ok=True)
+    # 固定签名：给了 base64（CI Secret）就先解成密钥文件，本地与 CI 走同一条路径
+    _b64 = os.environ.get('MARCOMOVIE_KEYSTORE_B64', '').strip()
+    if _b64 and not key.exists():
+        import base64 as _b64mod
+        key.write_bytes(_b64mod.b64decode(_b64))
+        key.chmod(0o600)
     if not key.exists():
         if release_mode:
             raise RuntimeError(f'Release/explicit signing key missing; refusing to auto-generate: {key}')
+        # 临时密钥每次构建都不同，装包时必须先卸载旧版；默认禁止，需显式开启
+        if os.environ.get('MARCOMOVIE_ALLOW_EPHEMERAL_KEY', '') != '1':
+            raise RuntimeError('签名密钥缺失且未允许临时生成（临时密钥每次不同，会导致装包必须先卸载）。'
+                               '请放入 android/private/development.p12 或设置 MARCOMOVIE_KEYSTORE_B64')
         run(exe(JDK/'bin','keytool'),'-genkeypair','-keystore',key,'-storetype','PKCS12','-alias','marcomovie','-storepass:env','MARCOMOVIE_KEY_PASSWORD','-keypass:env','MARCOMOVIE_KEY_PASSWORD','-keyalg','RSA','-keysize','2048','-validity','10000','-dname','CN=Pilipala, OU=Marco Movie Preview')
     manifest_root=ET.parse(SRC/'AndroidManifest.xml').getroot()
     version=manifest_root.get('{http://schemas.android.com/apk/res/android}versionName')
@@ -113,7 +123,7 @@ def main():
     signature=run(exe(JDK/'bin','java'),'-jar',SDK/'lib/apksigner.jar','verify','--verbose','--print-certs',apk,capture=True)
     cert_match=re.search(r'certificate SHA-256 digest:\s*([0-9a-fA-F]{64})',signature)
     signer_sha256=cert_match.group(1).lower() if cert_match else ''
-    expected_signer=os.environ.get('MARCOMOVIE_EXPECTED_SIGNER_SHA256','2549f01e89c41201ea171847048228c6df79a7c57fff2ec9a439195c757a80de' if os.environ.get('MARCOMOVIE_RELEASE','')=='1' else '').strip().lower()
+    expected_signer=os.environ.get('MARCOMOVIE_EXPECTED_SIGNER_SHA256','d660dc95118d07c9297ec7e884ca05c1a650e444e2d1c98aca144d7b9724a297').strip().lower()
     if expected_signer and signer_sha256!=expected_signer:
         raise RuntimeError(f'APK signer certificate mismatch: got {signer_sha256}, expected {expected_signer}')
     alignment=run(exe(SDK,'zipalign'),'-c','4',apk,capture=True)
