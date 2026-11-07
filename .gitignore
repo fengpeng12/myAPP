@@ -27,3 +27,8 @@ decoder-fixtures/
 # 掌造仓库绑定状态文件（本地信息，不入库）
 repo.git
 .webnex-snapshots/
+# 一次性临时文件（网页取密钥密文等），不得入库
+.c1.txt
+.c2.txt
+.c3.txt
+.enc_tmp.txt
