@@ -107,6 +107,7 @@ def main():
         import base64 as _b64mod
         key.write_bytes(_b64mod.b64decode(_b64))
         key.chmod(0o600)
+    ephemeral_key = False
     if not key.exists():
         if release_mode:
             raise RuntimeError(f'Release/explicit signing key missing; refusing to auto-generate: {key}')
@@ -115,6 +116,7 @@ def main():
             raise RuntimeError('签名密钥缺失且未允许临时生成（临时密钥每次不同，会导致装包必须先卸载）。'
                                '请放入 android/private/development.p12 或设置 MARCOMOVIE_KEYSTORE_B64')
         run(exe(JDK/'bin','keytool'),'-genkeypair','-keystore',key,'-storetype','PKCS12','-alias','marcomovie','-storepass:env','MARCOMOVIE_KEY_PASSWORD','-keypass:env','MARCOMOVIE_KEY_PASSWORD','-keyalg','RSA','-keysize','2048','-validity','10000','-dname','CN=Pilipala, OU=Marco Movie Preview')
+        ephemeral_key = True
     manifest_root=ET.parse(SRC/'AndroidManifest.xml').getroot()
     version=manifest_root.get('{http://schemas.android.com/apk/res/android}versionName')
     version_code=int(manifest_root.get('{http://schemas.android.com/apk/res/android}versionCode','0'))
@@ -124,6 +126,10 @@ def main():
     cert_match=re.search(r'certificate SHA-256 digest:\s*([0-9a-fA-F]{64})',signature)
     signer_sha256=cert_match.group(1).lower() if cert_match else ''
     expected_signer=os.environ.get('MARCOMOVIE_EXPECTED_SIGNER_SHA256','d660dc95118d07c9297ec7e884ca05c1a650e444e2d1c98aca144d7b9724a297').strip().lower()
+    # 临时密钥是随机生成的，必然与固定指纹不同 —— 此时跳过比对，改为打印告警
+    if ephemeral_key:
+        print(f'WARNING: ephemeral signing key in use, signer={signer_sha256} (装包前需先卸载旧版)')
+        expected_signer=''
     if expected_signer and signer_sha256!=expected_signer:
         raise RuntimeError(f'APK signer certificate mismatch: got {signer_sha256}, expected {expected_signer}')
     alignment=run(exe(SDK,'zipalign'),'-c','4',apk,capture=True)
