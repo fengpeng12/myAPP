@@ -1,0 +1,166 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+import '../core/models.dart';
+import 'apple_theme.dart';
+
+/// Variable-height source rows keep the complete name readable at large text sizes.
+class SourceChoiceSliver extends StatelessWidget {
+  final List<CmsSite> sites;
+  final String? selectedKey;
+  final String Function(CmsSite) badgeLabel;
+  final Color Function(CmsSite) badgeColor;
+  final ValueChanged<CmsSite> onSelected;
+  final String preferredKey;
+  final ValueChanged<CmsSite>? onPreferred;
+
+  const SourceChoiceSliver({
+    super.key,
+    required this.sites,
+    required this.selectedKey,
+    required this.badgeLabel,
+    required this.badgeColor,
+    required this.onSelected,
+    this.preferredKey = '',
+    this.onPreferred,
+  });
+
+  @override
+  Widget build(BuildContext context) => SliverLayoutBuilder(
+    builder: (context, constraints) {
+      final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+      final columns = (constraints.crossAxisExtent / (280 * scale))
+          .floor()
+          .clamp(1, 3);
+      return SliverList.builder(
+        itemCount: (sites.length / columns).ceil(),
+        itemBuilder: (context, row) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var col = 0; col < columns; col++) ...[
+                if (col > 0) const SizedBox(width: 10),
+                Expanded(
+                  child: row * columns + col >= sites.length
+                      ? const SizedBox()
+                      : _card(context, sites[row * columns + col]),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+  Widget _card(BuildContext context, CmsSite site) {
+    final selected = site.key == selectedKey;
+    final color = badgeColor(site);
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => onSelected(site),
+          child: Ink(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: selected
+                    ? const [Color(0x450A84FF), Color(0x280055B3)]
+                    : const [Color(0xCC24242C), Color(0xB818181E)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: selected
+                    ? AppleColors.systemBlue
+                    : AppleColors.glassBorder,
+                width: selected ? 1.2 : .6,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        site.name,
+                        softWrap: true,
+                        style: const TextStyle(
+                          color: AppleColors.labelPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                    if (onPreferred != null)
+                      IconButton(
+                        key: ValueKey('source-preference-${site.key}'),
+                        tooltip: preferredKey == site.key
+                            ? '取消默认偏好源'
+                            : '设为默认偏好源',
+                        onPressed: () => onPreferred!(site),
+                        icon: Icon(
+                          preferredKey == site.key
+                              ? Icons.star_rounded
+                              : Icons.star_border_rounded,
+                          color: preferredKey == site.key
+                              ? Colors.amber
+                              : AppleColors.labelSecondary,
+                        ),
+                      ),
+                    if (selected)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 8, top: 2),
+                        child: Icon(
+                          CupertinoIcons.checkmark_circle_fill,
+                          color: AppleColors.systemBlue,
+                          size: 18,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 5,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: .2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        badgeLabel(site),
+                        style: TextStyle(color: color, fontSize: 11),
+                      ),
+                    ),
+                    Text(
+                      site.group.trim().isEmpty ? '默认分组' : site.group,
+                      style: const TextStyle(
+                        color: AppleColors.labelSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

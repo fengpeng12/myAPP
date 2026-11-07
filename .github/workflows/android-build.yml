@@ -1,0 +1,61 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "android/**"
+      - "scripts/**"
+      - "shared/**"
+      - ".github/workflows/android-build.yml"
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17"
+
+      - name: Locate Android SDK Build-Tools and NDK
+        run: |
+          set -e
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          echo "MARCOMOVIE_BUILD_TOOLS=$BUILD_TOOLS" >> "$GITHUB_ENV"
+
+          NDK=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -z "$NDK" ]; then
+            echo "NDK not preinstalled, installing one"
+            yes | "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125" > /dev/null
+            NDK="$ANDROID_HOME/ndk/26.1.10909125"
+          fi
+          echo "ANDROID_NDK_HOME=$NDK" >> "$GITHUB_ENV"
+          echo "build-tools: $BUILD_TOOLS"
+          echo "ndk: $NDK"
+
+      - name: Build APK
+        run: python scripts/build_android.py
+
+      - name: List outputs
+        run: ls -lh dist/ || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MarcoMovie-APK
+          path: |
+            dist/*.apk
+            dist/*.sha256
