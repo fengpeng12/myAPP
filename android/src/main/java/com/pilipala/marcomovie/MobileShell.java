@@ -1260,7 +1260,7 @@ final class MobileShell {
         card.addView(logo, new LinearLayout.LayoutParams(a.dp(64), a.dp(64)));
         a.gap(card, 12);
 
-        TextView heading = a.text("把今晚，留给好故事。", 23, MainActivity.WHITE);
+        TextView heading = a.text("把今天，留给好故事。", 23, MainActivity.WHITE);
         heading.setTypeface(null, Typeface.BOLD);
         heading.setGravity(Gravity.CENTER);
         card.addView(heading);
